@@ -1,0 +1,50 @@
+name: ConnectSensors mailbox
+version: "0.1.0"
+slug: cs_mailbox
+description: >-
+  Runs cs-mailbox, the ConnectSensors federation mailbox, so that homes can
+  pass each other the sensor frames their proxies hear.
+url: https://github.com/chrisuthe/HAOS-cs-mailbox
+# Published by .github/workflows/build.yml, one tag per version below.
+image: ghcr.io/chrisuthe/haos-cs-mailbox
+arch:
+  - amd64
+  - aarch64
+stage: experimental
+# The launcher execs cs-mailbox, which handles SIGTERM itself as PID 1.
+init: false
+# The container port is fixed; change the host port in the Network section.
+ports:
+  8443/tcp: 8443
+ports_description:
+  8443/tcp: Mailbox (WebSocket over TLS)
+map:
+  - type: ssl
+    read_only: true
+options:
+  # Empty rather than absent, so the configuration screen shows the field. The
+  # app does not start until it names at least one host.
+  hosts: []
+  ssl: false
+  certfile: fullchain.pem
+  keyfile: privkey.pem
+  admission: open
+  admit_per_hour: 20
+  members: []
+schema:
+  hosts:
+    - str
+  ssl: bool
+  certfile: str
+  keyfile: str
+  admission: list(open|members)
+  admit_per_hour: int(0,)
+  members:
+    - match(^[0-9a-fA-F]{64}$)
+  reg_burst: int(0,)?
+  reg_per_hour: int(0,)?
+  reg_max_live: int(0,)?
+  publish_rate: float(0,)?
+  publish_burst: int(0,)?
+  request_rate: float(0,)?
+  message_rate: float(0,)?
