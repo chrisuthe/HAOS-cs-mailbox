@@ -9,6 +9,10 @@ profile cs_mailbox flags=(attach_disconnected,mediate_deleted) {
   # process may do, below.
   file,
   deny /ssl/** w,
+  # The launcher execs cs-mailbox, a Python script; the health check runs python3.
+  /usr/local/bin/** ix,
+  /usr/bin/** ix,
+  /bin/** ix,
 
   # The launcher prepares /data as root, then becomes the mailbox user.
   capability chown,
@@ -26,6 +30,5 @@ profile cs_mailbox flags=(attach_disconnected,mediate_deleted) {
   network unix,
   network netlink raw,
 
-  signal (receive),
-  signal (send) peer=@{profile_name},
+  signal (receive) set=(kill,term,int,hup,cont),
 }

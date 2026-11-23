@@ -4,4 +4,7 @@
 cs-mailbox @ git+https://github.com/chrisuthe/ConnectSensors@8f710619d1a33be7050e772bd8c7efc11a84a21d#subdirectory=mailbox
 connectsensors==0.4.1
 cryptography==50.0.2
+# cryptography's own dependencies, pinned so a rebuild installs the same set.
+cffi==2.1.1
+pycparser==3.12
 websockets==17.4
