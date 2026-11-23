@@ -1,0 +1,153 @@
+name: Build
+
+# Tests every push and pull request, and publishes from main. A version of the
+# app is published once: the publish job does nothing when the version in
+# config.yaml already has an image, so a version bump on main is the release.
+# scripts/verify.sh runs the same checks locally.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+# Only pull requests are cancelled when superseded. A run on main may be in the
+# middle of publishing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  IMAGE: ghcr.io/chrisuthe/haos-cs-mailbox
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Third-party actions are pinned to a commit, since a tag can be
+      # repointed. The trailing comment is the version that commit was.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # actionlint 1.7.12, by digest. Dependabot cannot see a `run:` script.
+      - name: Lint the workflows
+        run: |
+          docker run --rm --volume "$PWD:/repo" --workdir /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color
+
+      - name: Lint the shell scripts
+        run: shellcheck scripts/*.sh
+
+      # A manifest the Supervisor rejects is an app that never shows up in the
+      # store, with no other symptom.
+      - name: Lint the app manifest
+        uses: frenck/action-addon-linter@d51677290aef26cdfc835271dd3c7343ce502809 # v2.21.2
+        with:
+          path: ./cs_mailbox
+
+  # Both architectures on native runners, so the smoke test runs the real
+  # image for each rather than an emulated one.
+  test:
+    name: test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The runner has podman as well, and the script prefers it. docker is
+      # what publishes, so docker is what gets tested.
+      - name: Smoke test
+        env:
+          ENGINE: docker
+        run: ./scripts/smoke_test.sh
+
+  publish:
+    name: publish
+    needs: [lint, test]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    # Two runs on main must not race to publish the same version.
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read the app version
+        id: version
+        run: |
+          version="$(sed -nE 's/^version: "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' cs_mailbox/config.yaml)"
+          [ -n "$version" ] || {
+            echo "::error::no version in cs_mailbox/config.yaml"
+            exit 1
+          }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Log in to the registry
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$TOKEN"
+
+      - name: Check whether this version is already published
+        id: published
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+            echo "$IMAGE:$VERSION is already published"
+            echo "exists=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      # The image's RUN steps (pip) run under emulation for arm64. They only
+      # install prebuilt wheels, so emulation costs little; the arm64 image
+      # itself was smoke tested natively above.
+      - name: Set up QEMU
+        if: steps.published.outputs.exists == 'false'
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Buildx
+        if: steps.published.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push
+        if: steps.published.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --provenance=false \
+            --tag "$IMAGE:$VERSION" \
+            --tag "$IMAGE:latest" \
+            --push \
+            cs_mailbox

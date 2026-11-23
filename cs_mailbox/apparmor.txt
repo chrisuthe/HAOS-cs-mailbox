@@ -1,0 +1,31 @@
+#include <tunables/global>
+
+# The Supervisor renames the profile to the app's slug when it loads it.
+profile cs_mailbox flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Files are left open: the image is a stock Python one and cs-mailbox reads
+  # nothing outside it but /data, /ssl and /run. The narrowing is in what the
+  # process may do, below.
+  file,
+  deny /ssl/** w,
+
+  # The launcher prepares /data as root, then becomes the mailbox user.
+  capability chown,
+  capability fowner,
+  capability dac_override,
+  capability dac_read_search,
+  capability setuid,
+  capability setgid,
+
+  # A TCP server (and name lookups); no raw or packet sockets.
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network inet6 dgram,
+  network unix,
+  network netlink raw,
+
+  signal (receive),
+  signal (send) peer=@{profile_name},
+}

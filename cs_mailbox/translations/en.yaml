@@ -1,0 +1,61 @@
+configuration:
+  hosts:
+    name: Hosts
+    description: >-
+      The host names or IP addresses homes use in the mailbox URL, such as
+      192.168.1.20 for wss://192.168.1.20:8443/. The server signs the one each
+      client asked for, and the certificate must name it. At least one is
+      required.
+  ssl:
+    name: Use a certificate from /ssl
+    description: >-
+      Serve the certificate and key named below, from Home Assistant's /ssl
+      folder. Off makes a self-signed certificate on first start and keeps it;
+      the log shows it, ready to paste into the integration's Trusted
+      certificate option.
+  certfile:
+    name: Certificate file
+    description: The certificate chain in /ssl. Only used with the option above on.
+  keyfile:
+    name: Private key file
+    description: The certificate's private key in /ssl. Only used with the option above on.
+  admission:
+    name: Admission
+    description: >-
+      open admits any client key, with a limit on new keys per address;
+      members admits only the keys in the member list.
+  admit_per_hour:
+    name: New clients per address per hour
+    description: >-
+      With open admission, how many new client keys one IP address (or IPv6
+      /64) may bring each hour.
+  members:
+    name: Member keys
+    description: >-
+      With members admission, the client public keys admitted, 64 hex digits
+      each. A home uses a separate key for each mailbox server.
+  reg_burst:
+    name: Registration burst
+    description: Registration entries per owner key at once. Unset is 2048.
+  reg_per_hour:
+    name: Registrations per hour
+    description: Registration entries per owner key per hour after the burst. Unset is 512.
+  reg_max_live:
+    name: Live registrations
+    description: Registrations one owner key may hold at a time. Unset is 4096.
+  publish_rate:
+    name: Publishes per second
+    description: Frames per second one client key may publish. Unset is 5.
+  publish_burst:
+    name: Publish burst
+    description: Frames one client key may publish at once. Unset is 20.
+  request_rate:
+    name: Requests per second
+    description: Downlink requests per second per client key. Unset is 10.
+  message_rate:
+    name: Messages per second
+    description: >-
+      Signed messages of any kind per second per client key, with a burst of
+      twice that. Unset is 50.
+network:
+  8443/tcp: Mailbox (WebSocket over TLS)
