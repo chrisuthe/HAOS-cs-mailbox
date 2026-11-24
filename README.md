@@ -12,7 +12,20 @@ This repository packages `cs-mailbox`; it does not fork it. The server is
 developed in ConnectSensors, and fixes to it go there. See
 [cs_mailbox/DOCS.md](cs_mailbox/DOCS.md) for the user documentation.
 
-Experimental.
+## Status
+
+Experimental, like ConnectSensors itself.
+
+- **Current release:** 0.1.1, built from ConnectSensors
+  [`2ea6cee`](https://github.com/chrisuthe/ConnectSensors/commit/2ea6cee8e5db11f450884c0eaa51c33814f2f2dc)
+  with `connectsensors` 0.4.2.
+- **Works with:** the [ConnectSensors integration](https://github.com/chrisuthe/connect-sensors-ha)
+  0.2.0 or later, currently 0.2.3. Point its federation options at
+  `wss://<host>:8443/`, and paste the app's logged certificate into
+  **Trusted certificate** when the app uses its self-signed one.
+- **Tested:** end to end on Home Assistant OS, with two homes federating a door
+  sensor through the app. Updates keep the same `server_id` and certificate.
+  Each image passes a smoke test on amd64 and aarch64.
 
 ## Install
 
