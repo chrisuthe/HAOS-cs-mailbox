@@ -99,7 +99,7 @@ directly, and a volume for `/data`, where it keeps the server key:
 
 ```sh
 docker run -d -p 8443:8443 -v cs-mailbox:/data -v /etc/letsencrypt:/etc/letsencrypt:ro \
-    ghcr.io/chrisuthe/haos-cs-mailbox:0.1.0 \
+    ghcr.io/chrisuthe/haos-cs-mailbox:0.1.1 \
     --host mailbox.example \
     --tls-cert /etc/letsencrypt/live/mailbox.example/fullchain.pem \
     --tls-key /etc/letsencrypt/live/mailbox.example/privkey.pem
