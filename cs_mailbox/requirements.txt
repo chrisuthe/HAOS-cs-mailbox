@@ -1,8 +1,8 @@
 # Installed into the image by the Dockerfile. cs-mailbox is pinned to a
-# ConnectSensors commit (8f71061 is the connectsensors 0.4.1 release), and its
+# ConnectSensors commit (2ea6cee is the connectsensors 0.4.2 release), and its
 # protocol code comes from the connectsensors release that commit was made with.
-cs-mailbox @ git+https://github.com/chrisuthe/ConnectSensors@8f710619d1a33be7050e772bd8c7efc11a84a21d#subdirectory=mailbox
-connectsensors==0.4.1
+cs-mailbox @ git+https://github.com/chrisuthe/ConnectSensors@2ea6cee8e5db11f450884c0eaa51c33814f2f2dc#subdirectory=mailbox
+connectsensors==0.4.2
 cryptography==50.0.2
 # cryptography's own dependencies, pinned so a rebuild installs the same set.
 cffi==2.1.1

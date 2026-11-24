@@ -1,5 +1,5 @@
 name: ConnectSensors mailbox
-version: "0.1.0"
+version: "0.1.1"
 slug: cs_mailbox
 description: >-
   Runs cs-mailbox, the ConnectSensors federation mailbox, so that homes can
