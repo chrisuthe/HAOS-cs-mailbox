@@ -4,12 +4,13 @@
 profile cs_mailbox flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
-  # Files are left open: the image is a stock Python one and cs-mailbox reads
-  # nothing outside it but /data, /ssl and /run. The narrowing is in what the
-  # process may do, below.
+  # Files are left open: the image is the stock-Python cs-mailbox one, with the
+  # server under /app, and cs-mailbox reads nothing outside it but /data, /ssl
+  # and /run. The narrowing is in what the process may do, below.
   file,
   deny /ssl/** w,
-  # The launcher execs cs-mailbox, a Python script; the health check runs python3.
+  # The launcher execs /usr/local/bin/python3 on /app/mailbox/cs_mailbox.py;
+  # the health check runs python3 too.
   /usr/local/bin/** ix,
   /usr/bin/** ix,
   /bin/** ix,

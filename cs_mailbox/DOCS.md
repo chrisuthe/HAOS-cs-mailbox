@@ -4,6 +4,8 @@ Runs [cs-mailbox](https://github.com/chrisuthe/ConnectSensors/tree/main/mailbox)
 the federation mailbox server of
 [ConnectSensors](https://github.com/chrisuthe/ConnectSensors)
 ([spec 09](https://github.com/chrisuthe/ConnectSensors/blob/main/spec/09-federation-relay.md)).
+The server is the published `ghcr.io/chrisuthe/cs-mailbox` image; the app adds
+these options, the self-signed certificate and Home Assistant's `/ssl`.
 Homes that use the same mailbox pass each other the frames their proxies hear
 from sensors they do not own, and the downlinks those sensors are owed. The
 mailbox reads no payloads and holds no device keys.
@@ -99,14 +101,16 @@ directly, and a volume for `/data`, where it keeps the server key:
 
 ```sh
 docker run -d -p 8443:8443 -v cs-mailbox:/data -v /etc/letsencrypt:/etc/letsencrypt:ro \
-    ghcr.io/chrisuthe/haos-cs-mailbox:0.1.1 \
+    ghcr.io/chrisuthe/haos-cs-mailbox:0.2.0 \
     --host mailbox.example \
     --tls-cert /etc/letsencrypt/live/mailbox.example/fullchain.pem \
     --tls-key /etc/letsencrypt/live/mailbox.example/privkey.pem
 ```
 
 `--help` lists every argument. Keep the container port at 8443, which the
-health check uses. To use the options above instead, including the
+health check uses. The `CS_MAILBOX_*` variables of the `cs-mailbox` image have
+no effect here; use the arguments. Outside Home Assistant, that image itself
+may suit better. To use the options above instead, including the
 self-signed certificate, put them in `/data/options.json` and pass no
 arguments.
 

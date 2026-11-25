@@ -1,6 +1,6 @@
-# Follows the `uses:` pins in the workflows. The base image digest, the Python
-# requirements and the actionlint digest inside a `run:` script are moved by
-# hand, together with scripts/verify.sh's pins.
+# Follows the `uses:` pins in the workflows. The cs-mailbox base image digest
+# and the actionlint digest inside a `run:` script are moved by hand, together
+# with scripts/verify.sh's pins.
 version: 2
 updates:
   - package-ecosystem: github-actions

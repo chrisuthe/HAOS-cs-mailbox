@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """A minimal cs-mailbox client for scripts/smoke_test.sh (spec 09 section 12).
 
-Runs inside the app image, which has the connectsensors package and websockets.
+Runs inside the app image, which has websockets, and the connectsensors package
+under /app/python as the base cs-mailbox image lays it out.
 The mailbox helpers (greeting, auth, signed messages, registration proofs) are
 in connectsensors._csframe, the spec's reference module that cs-mailbox itself
 uses; the package's public surface does not export them.
@@ -15,14 +16,20 @@ Exits 1 on any failed check.
 import argparse
 import asyncio
 import json
+import os
 import secrets
 import ssl
 import sys
 import time
 from urllib.parse import urlsplit
 
-from connectsensors import _csframe as cs
-from websockets.asyncio.client import connect
+# The base image keeps the ConnectSensors checkout's layout instead of installing
+# the package; cs_mailbox.py takes it from there the same way.
+if os.path.isdir("/app/python/connectsensors"):
+    sys.path.insert(0, "/app/python")
+
+from connectsensors import _csframe as cs  # noqa: E402
+from websockets.asyncio.client import connect  # noqa: E402
 
 SUBPROTOCOL = "cs-mailbox.1"
 
