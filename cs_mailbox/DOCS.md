@@ -24,6 +24,9 @@ mailbox reads no payloads and holds no device keys.
 The port is 8443 unless you change it in the app's **Network** section; the URL
 uses whichever port you set there.
 
+To give the mailbox a public name and certificate through the Nginx Proxy
+Manager app instead, see [Behind Nginx Proxy Manager](#behind-nginx-proxy-manager).
+
 ## Configuration
 
 | Option | Meaning |
@@ -34,6 +37,7 @@ uses whichever port you set there.
 | **Admission** | `open` or `members`. See below. |
 | **New clients per address per hour** | With `open`: new client keys one address may bring each hour. Default 20. |
 | **Member keys** | With `members`: the client public keys admitted, 64 hex digits each. |
+| **Trusted proxies** | Empty (the default): the app serves TLS itself. Set: address ranges of a reverse proxy that terminates TLS, such as `172.30.33.0/24`. See [Behind Nginx Proxy Manager](#behind-nginx-proxy-manager). |
 
 The limits are behind "Show unused optional configuration options". Unset, each
 takes cs-mailbox's default, which is the open server's limit from spec 09
@@ -71,6 +75,75 @@ a public authority.
 
 The private keys are never written to the log.
 
+## Behind Nginx Proxy Manager
+
+The [Nginx Proxy Manager](https://github.com/hassio-addons/app-nginx-proxy-manager)
+app can hold a public certificate for the mailbox and terminate TLS. The
+mailbox then serves plain WebSocket to NPM, refuses everyone else, and counts
+each client by the address NPM reports
+([spec 09](https://github.com/chrisuthe/ConnectSensors/blob/main/spec/09-federation-relay.md)
+section 12.1). Homes see an ordinary `wss://` server with a public certificate.
+
+1. In this app's **Configuration**:
+   - set **Hosts** to the public name homes will use, such as
+     `mailbox.example.com`;
+   - set **Trusted proxies** to `172.30.33.0/24`;
+   - leave **Use a certificate from /ssl** off. The app refuses to start with
+     both set.
+2. In the app's **Network** section, clear the host port so the plain port is
+   not published on your network. NPM reaches the app over Home Assistant's
+   internal network, which does not need it.
+3. Start the app. The log reads `Behind a TLS-terminating proxy: serving plain
+   WebSocket, without a certificate, to 172.30.33.0/24 only` and `Listening on
+   ws://0.0.0.0:8443 ... behind trusted proxies 172.30.33.0/24`. No certificate
+   is made or shown.
+4. Note the app's **Hostname** on its **Info** tab, such as
+   `f202d657-cs-mailbox` (the first part depends on the repository URL you added).
+5. In NPM, under **Hosts → Proxy Hosts → Add Proxy Host**:
+   - **Details:** Domain Names `mailbox.example.com`; Scheme `http`; Forward
+     Hostname / IP the hostname from step 4; Forward Port `8443`; turn on
+     **Websockets Support**.
+   - **SSL:** request a Let's Encrypt certificate for the name, or pick one you
+     have, and turn on **Force SSL**.
+6. In each home's ConnectSensors integration, add the mailbox
+   `wss://mailbox.example.com/` and leave **Trusted certificate** empty: the
+   certificate comes from a public authority.
+
+NPM passes the public name through as `Host`, which is the name the mailbox's
+greeting is signed for, so it must be listed under **Hosts**.
+
+### Which addresses to trust
+
+Apps on Home Assistant's internal network are given addresses from
+`172.30.33.0/24` when they start, so NPM's address can change from one restart
+to the next; the range covers any address it gets. NPM forwards over IPv4 (its
+nginx resolver has IPv6 turned off), so no IPv6 range is needed.
+
+Do not trust the whole internal network, `172.30.32.0/23`. Its gateway,
+`172.30.32.1`, is the host itself: Home Assistant Core, apps on the host
+network, and connections through Docker's port proxy all arrive from it. The app
+warns in its log if a range includes it.
+
+`172.30.33.0/24` still trusts every other app on the system: any of them may
+connect without TLS and report any client address. That affects only open
+admission's limit on new keys per address; it gets past neither **members**
+admission nor the clients' own keys. To narrow it, trust NPM's current address
+alone, such as `172.30.33.5/32` (`ha addons info a0d7b954_nginxproxymanager`
+shows it as `ip_address`). If NPM later gets another address, the mailbox
+refuses it and logs `172.30.33.6: not a trusted proxy, refused`; update the
+option to match.
+
+### NPM and forwarded addresses
+
+NPM itself trusts an incoming `X-Real-IP` header from private addresses
+(`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) and from the Cloudflare and
+CloudFront ranges it downloads at start. So a client on your LAN, or anyone who
+points their own Cloudflare zone or CloudFront distribution at your name, can
+choose the address the mailbox counts it by. NPM's own setting to stop the
+download, `IP_RANGES_FETCH_ENABLED=false`, is not offered by the NPM app. Again
+this weakens only open admission's per-address limit. Where that limit must
+hold, use **members** admission.
+
 ## Admission
 
 **open** admits any client key. To slow down anyone minting keys, each IP
@@ -101,7 +174,7 @@ directly, and a volume for `/data`, where it keeps the server key:
 
 ```sh
 docker run -d -p 8443:8443 -v cs-mailbox:/data -v /etc/letsencrypt:/etc/letsencrypt:ro \
-    ghcr.io/chrisuthe/haos-cs-mailbox:0.2.0 \
+    ghcr.io/chrisuthe/haos-cs-mailbox:0.3.0 \
     --host mailbox.example \
     --tls-cert /etc/letsencrypt/live/mailbox.example/fullchain.pem \
     --tls-key /etc/letsencrypt/live/mailbox.example/privkey.pem
@@ -117,4 +190,5 @@ arguments.
 ## Security
 
 `cs-mailbox` runs as an unprivileged user; the app's launcher prepares `/data`
-as root first. TLS 1.3 is required. The app has an AppArmor profile.
+as root first. TLS 1.3 is required, between homes and NPM when the app runs
+behind it. The app has an AppArmor profile.

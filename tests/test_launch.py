@@ -90,6 +90,80 @@ class BuildArgv(unittest.TestCase):
             self.assertEqual(flag(a, f), "1")
 
 
+class TrustedProxy(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        for name, value in (("STATE_DIR", self.dir / "state"), ("RUN_DIR", self.dir / "run"),
+                            ("SSL_DIR", self.dir / "ssl")):
+            patcher = mock.patch.object(launch, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        (self.dir / "run").mkdir()
+
+    def run_options(self, options):
+        with mock.patch.object(launch, "log") as log, mock.patch.object(launch, "is_root", return_value=False):
+            a = launch.from_options(options)
+        return a, "\n".join(c.args[0] for c in log.call_args_list)
+
+    def test_ranges(self):
+        nets = launch.trusted_proxies_of({"trusted_proxy": [" 172.30.33.0/24 ", "", "10.0.0.5", "fd00::/64"]})
+        self.assertEqual([str(n) for n in nets], ["172.30.33.0/24", "10.0.0.5/32", "fd00::/64"])
+        self.assertEqual(launch.trusted_proxies_of({"trusted_proxy": []}), [])
+        self.assertEqual(launch.trusted_proxies_of({}), [])
+
+    def test_bad_ranges(self):
+        for value, why in (("172.30.33.5/24", "host bits"), ("nginx", "not an address range"),
+                           ("172.30.33.0/33", "not an address range"), ("0.0.0.0/0", "every address"),
+                           ("::/0", "every address"), ("::ffff:172.30.33.0/120", "IPv4 form")):
+            with self.subTest(value), self.assertRaisesRegex(launch.ConfigError, why):
+                launch.trusted_proxies_of({"trusted_proxy": [value]})
+
+    def test_argv_has_no_tls(self):
+        a, logged = self.run_options({**BASE, "trusted_proxy": ["172.30.33.0/24", "fd0c:ac1e:2100::42/128"]})
+        self.assertEqual([a[i + 1] for i, x in enumerate(a) if x == "--trusted-proxy"],
+                         ["172.30.33.0/24", "fd0c:ac1e:2100::42/128"])
+        for f in ("--tls-cert", "--tls-key", "--insecure-dev"):
+            self.assertNotIn(f, a)
+        self.assertEqual(flag(a, "--host"), "192.168.1.20")
+        self.assertEqual(flag(a, "--admit-per-hour"), "20")
+        self.assertIn("serving plain WebSocket, without a certificate, to 172.30.33.0/24", logged)
+        self.assertNotIn("WARNING", logged)
+
+    def test_no_certificate_work(self):
+        with mock.patch.object(launch, "self_signed") as self_signed, \
+                mock.patch.object(launch, "fingerprint") as fp, mock.patch.object(launch, "ssl_file") as ssl_file:
+            _, logged = self.run_options({**BASE, "trusted_proxy": ["172.30.33.0/24"]})
+        self_signed.assert_not_called()
+        fp.assert_not_called()
+        ssl_file.assert_not_called()
+        self.assertFalse((self.dir / "state/tls").exists())
+        self.assertNotIn("CERTIFICATE", logged)
+
+    def test_with_ssl_is_refused(self):
+        with self.assertRaisesRegex(launch.ConfigError, "Trusted proxies and Use a certificate from /ssl"):
+            self.run_options({**BASE, "ssl": True, "trusted_proxy": ["172.30.33.0/24"]})
+
+    def test_still_needs_hosts(self):
+        with self.assertRaisesRegex(launch.ConfigError, "at least one host"):
+            self.run_options({**BASE, "hosts": [], "trusted_proxy": ["172.30.33.0/24"]})
+
+    def test_gateway_warning(self):
+        for value in ("172.30.32.0/23", "fd0c:ac1e:2100::/48"):
+            with self.subTest(value):
+                _, logged = self.run_options({**BASE, "trusted_proxy": [value]})
+                self.assertIn("WARNING: Trusted proxies range", logged)
+
+    def test_empty_keeps_tls(self):
+        tls = (Path("/c.pem"), Path("/k.pem"))
+        with mock.patch.object(launch, "self_signed", return_value=tls) as self_signed:
+            a, _ = self.run_options({**BASE, "trusted_proxy": [" "]})
+        self_signed.assert_called_once()
+        self.assertNotIn("--trusted-proxy", a)
+        self.assertEqual(flag(a, "--tls-cert"), "/c.pem")
+
+
 class SslFile(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

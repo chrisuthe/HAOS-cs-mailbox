@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Add **Trusted proxies** (`trusted_proxy`), to run behind the Nginx Proxy
+  Manager app or another TLS-terminating proxy. When set, the app serves plain
+  WebSocket to those ranges only, with no certificate, and counts clients by
+  the address the proxy reports. It cannot be combined with **Use a certificate
+  from /ssl**. See the documentation, "Behind Nginx Proxy Manager".
+
 ## 0.2.0
 
 - Build on the published server image, `ghcr.io/chrisuthe/cs-mailbox` 0.2.0,

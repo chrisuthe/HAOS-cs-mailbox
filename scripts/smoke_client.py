@@ -7,7 +7,12 @@ The mailbox helpers (greeting, auth, signed messages, registration proofs) are
 in connectsensors._csframe, the spec's reference module that cs-mailbox itself
 uses; the package's public surface does not export them.
 
-    smoke_client.py URL CERT [--seed HEX] [--full] [--expect-refused CODE] [--expect-untrusted]
+    smoke_client.py URL CERT [--seed HEX] [--full] [--header NAME:VALUE]...
+                    [--expect-refused CODE] [--expect-untrusted] [--expect-forbidden]
+
+A ws:// URL connects without TLS, as a reverse proxy does to a mailbox in
+trusted-proxy mode; --header then adds what the proxy would, such as
+X-Forwarded-For.
 
 Prints one JSON line: server_id and generation on success, or what was expected.
 Exits 1 on any failed check.
@@ -30,6 +35,7 @@ if os.path.isdir("/app/python/connectsensors"):
 
 from connectsensors import _csframe as cs  # noqa: E402
 from websockets.asyncio.client import connect  # noqa: E402
+from websockets.exceptions import InvalidStatus  # noqa: E402
 
 SUBPROTOCOL = "cs-mailbox.1"
 
@@ -77,9 +83,11 @@ class Link:
                     raise Refused(cs.MB_ERRORS[m[2]])
 
 
-async def session(url, cert, seed, full):
-    host = urlsplit(url).hostname.lower()
-    async with connect(url, ssl=tls_context(cert), subprotocols=[SUBPROTOCOL],
+async def session(url, cert, seed, full, headers=()):
+    parts = urlsplit(url)
+    host = parts.hostname.lower()
+    tls = tls_context(cert) if parts.scheme == "wss" else None
+    async with connect(url, ssl=tls, subprotocols=[SUBPROTOCOL], additional_headers=list(headers),
                        max_size=cs.MB_MAX_MESSAGE, compression=None, open_timeout=10) as ws:
         require(ws.subprotocol == SUBPROTOCOL, f"subprotocol {ws.subprotocol}")
         nonce_c = secrets.token_bytes(16)
@@ -125,9 +133,23 @@ def main():
     ap.add_argument("--expect-refused", metavar="CODE", help="pass only if the handshake is refused with CODE")
     ap.add_argument("--expect-untrusted", action="store_true",
                     help="pass only if the certificate fails validation without the pin")
+    ap.add_argument("--header", action="append", default=[], metavar="NAME:VALUE",
+                    help="an extra request header (repeatable)")
+    ap.add_argument("--expect-forbidden", action="store_true",
+                    help="pass only if the server answers the WebSocket upgrade with HTTP 403")
     args = ap.parse_args()
     seed = bytes.fromhex(args.seed) if args.seed else secrets.token_bytes(32)
+    headers = [tuple(x.strip() for x in h.split(":", 1)) for h in args.header]
     try:
+        if args.expect_forbidden:
+            try:
+                asyncio.run(session(args.url, args.cert, seed, False, headers))
+            except InvalidStatus as err:
+                status = err.response.status_code
+                require(status == 403, f"HTTP {status}, expected 403")
+                print(json.dumps({"forbidden": status}))
+                return 0
+            raise AssertionError("connected, expected HTTP 403")
         if args.expect_untrusted:
             try:
                 asyncio.run(session(args.url, None, seed, False))
@@ -136,7 +158,7 @@ def main():
                 return 0
             raise AssertionError("the certificate validated without being pinned")
         try:
-            result = asyncio.run(session(args.url, args.cert, seed, args.full))
+            result = asyncio.run(session(args.url, args.cert, seed, args.full, headers))
         except Refused as err:
             if str(err) == args.expect_refused:
                 print(json.dumps({"refused": str(err)}))
