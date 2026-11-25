@@ -1,5 +1,5 @@
 name: ConnectSensors mailbox
-version: "0.2.0"
+version: "0.3.0"
 slug: cs_mailbox
 description: >-
   Runs cs-mailbox, the ConnectSensors federation mailbox, so that homes can
@@ -17,7 +17,7 @@ init: false
 ports:
   8443/tcp: 8443
 ports_description:
-  8443/tcp: Mailbox (WebSocket over TLS)
+  8443/tcp: Mailbox (WebSocket over TLS, or plain behind a trusted proxy)
 map:
   - type: ssl
     read_only: true
@@ -31,6 +31,8 @@ options:
   admission: open
   admit_per_hour: 20
   members: []
+  # Empty: the app serves TLS itself.
+  trusted_proxy: []
 schema:
   hosts:
     - str
@@ -41,6 +43,8 @@ schema:
   admit_per_hour: int(0,)
   members:
     - match(^[0-9a-fA-F]{64}$)
+  trusted_proxy:
+    - str
   reg_burst: int(0,)?
   reg_per_hour: int(0,)?
   reg_max_live: int(0,)?

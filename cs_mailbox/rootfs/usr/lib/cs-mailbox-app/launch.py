@@ -35,6 +35,11 @@ SERVER = "/app/mailbox/cs_mailbox.py"
 PORT = 8443
 MAILBOX_UID = MAILBOX_GID = 10001
 CERT_DAYS = 3650
+# The gateways of the Supervisor's internal network (supervisor/const.py). A
+# gateway is the host itself: connections from host-network apps, Home Assistant
+# Core and Docker's userland port proxy arrive from it.
+SUPERVISOR_GATEWAYS = (ipaddress.ip_address("172.30.32.1"), ipaddress.ip_address("fd0c:ac1e:2100::1"))
+IPV4_MAPPED = ipaddress.ip_network("::ffff:0:0/96")
 
 # Option name -> cs-mailbox flag, for limits that pass straight through.
 LIMITS = {
@@ -70,6 +75,30 @@ def hosts_of(options):
     return hosts
 
 
+def trusted_proxies_of(options):
+    """The trusted_proxy ranges, checked here so that a bad one is explained in
+    the app's terms rather than by cs-mailbox's argument parser."""
+    nets = []
+    for value in options.get("trusted_proxy") or []:
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            net = ipaddress.ip_network(value)
+        except ValueError:
+            raise ConfigError(
+                f"Trusted proxies: {value!r} is not an address range such as 172.30.33.0/24. "
+                "Give a single address as itself or with /32, and a range without host bits "
+                "(172.30.33.0/24, not 172.30.33.5/24)"
+            ) from None
+        if net.prefixlen == 0:
+            raise ConfigError(f"Trusted proxies: {value} trusts every address; name the proxy's own range")
+        if net.version == 6 and net.subnet_of(IPV4_MAPPED):
+            raise ConfigError(f"Trusted proxies: write {value} in its IPv4 form")
+        nets.append(net)
+    return nets
+
+
 def ssl_file(name, what):
     """A file under /ssl named by the certfile or keyfile option."""
     if not _is_set(name):
@@ -89,11 +118,15 @@ def members_text(options):
     return "".join(f"{k}\n" for k in keys)
 
 
-def build_argv(options, hosts, cert, key, members_file):
+def build_argv(options, hosts, cert, key, members_file, proxies=()):
     argv = [SERVER, "--port", str(PORT), "--key-file", str(STATE_DIR / "server.key")]
     for host in hosts:
         argv += ["--host", host]
-    argv += ["--tls-cert", str(cert), "--tls-key", str(key)]
+    if proxies:
+        for net in proxies:
+            argv += ["--trusted-proxy", str(net)]
+    else:
+        argv += ["--tls-cert", str(cert), "--tls-key", str(key)]
     admission = options.get("admission", "open")
     if admission == "members":
         argv += ["--members", str(members_file)]
@@ -273,9 +306,30 @@ def pass_through(args):
     return argv
 
 
+def proxy_mode(proxies, ssl):
+    if ssl:
+        raise ConfigError(
+            "Trusted proxies and Use a certificate from /ssl are set together. Behind a "
+            "proxy, the proxy holds the certificate and the app serves plain WebSocket to "
+            "it: turn off Use a certificate from /ssl, or empty Trusted proxies"
+        )
+    log("Behind a TLS-terminating proxy: serving plain WebSocket, without a certificate, "
+        f"to {', '.join(map(str, proxies))} only. Other addresses are refused.")
+    for net in proxies:
+        for gateway in SUPERVISOR_GATEWAYS:
+            if gateway in net:
+                log(f"WARNING: Trusted proxies range {net} includes {gateway}, the gateway of "
+                    "the Supervisor's network, which is the host itself. Prefer 172.30.33.0/24, "
+                    "the range apps are given.")
+
+
 def from_options(options):
     hosts = hosts_of(options)
-    if options.get("ssl"):
+    proxies = trusted_proxies_of(options)
+    if proxies:
+        proxy_mode(proxies, options.get("ssl"))
+        cert = key = None
+    elif options.get("ssl"):
         cert = ssl_file(options.get("certfile"), "certfile")
         key = ssl_file(options.get("keyfile"), "keyfile")
         log(f"Using {cert} from Home Assistant's /ssl; "
@@ -287,7 +341,7 @@ def from_options(options):
     members = RUN_DIR / "members.txt"
     if options.get("admission") == "members":
         members.write_text(members_text(options))
-    return build_argv(options, hosts, cert, key, members)
+    return build_argv(options, hosts, cert, key, members, proxies)
 
 
 def server_env(environ):

@@ -34,6 +34,13 @@ configuration:
     description: >-
       With members admission, the client public keys admitted, 64 hex digits
       each. A home uses a separate key for each mailbox server.
+  trusted_proxy:
+    name: Trusted proxies
+    description: >-
+      Address ranges of a TLS-terminating reverse proxy, such as the Nginx
+      Proxy Manager app (172.30.33.0/24). When set, the app serves plain
+      WebSocket to these addresses only, with no certificate: the proxy holds
+      it. Not with the /ssl certificate option. Leave empty to serve TLS here.
   reg_burst:
     name: Registration burst
     description: Registration entries per owner key at once. Unset is 2048.
@@ -58,4 +65,4 @@ configuration:
       Signed messages of any kind per second per client key, with a burst of
       twice that. Unset is 50.
 network:
-  8443/tcp: Mailbox (WebSocket over TLS)
+  8443/tcp: Mailbox (WebSocket over TLS, or plain behind a trusted proxy)

@@ -53,7 +53,7 @@ start() {
 
 wait_listening() {
     for _ in $(seq 1 40); do
-        logs_have 'Listening on wss://' && return 0
+        logs_have 'Listening on wss\?://' && return 0
         [ "$("$ENGINE" inspect -f '{{.State.Running}}' "$NAME")" = true ] || break
         sleep 0.5
     done
@@ -199,6 +199,38 @@ check_no_private_key_logged
 cp "$work/ssl/fullchain.pem" "$work/client/cert.pem"
 client "$URL" --full >/dev/null || fail "client session with the /ssl certificate failed"
 
+echo "== trusted proxy: plain WebSocket, clients counted by the forwarded address"
+# The client stands in for the proxy: it shares the server's network namespace,
+# so it connects from 127.0.0.1.
+proxy_url="ws://127.0.0.1:8443/"
+proxy_options='{"hosts":["127.0.0.1"],"ssl":false,"admission":"open","admit_per_hour":1,"members":[],"trusted_proxy":["127.0.0.1/32"]}'
+start "$proxy_options"
+wait_listening
+logs_have 'Listening on ws://.* behind trusted proxies 127.0.0.1/32' || fail "server not in trusted-proxy mode"
+logs_have 'serving plain WebSocket, without a certificate' || fail "proxy mode not logged by the app"
+logs_have 'BEGIN CERTIFICATE' && fail "a certificate was logged in proxy mode"
+logs_have 'fingerprint' && fail "a fingerprint was logged in proxy mode"
+logs_have 'self-signed' && fail "the self-signed certificate was touched in proxy mode"
+check_no_private_key_logged
+client "$proxy_url" --full --header "X-Forwarded-For: 198.51.100.9, 203.0.113.7" >/dev/null \
+    || fail "client session through the trusted proxy failed"
+# One new key per address per hour: the proxy appended the last entry, so a second
+# key from 203.0.113.7 is refused, and one from another address is not.
+client "$proxy_url" --header "X-Forwarded-For: 203.0.113.7" --expect-refused NOT_PERMITTED >/dev/null \
+    || fail "admission did not count by the forwarded address"
+client "$proxy_url" --header "X-Real-IP: 203.0.113.8" >/dev/null \
+    || fail "a client at another forwarded address was not admitted"
+"$ENGINE" exec "$NAME" python3 -I -c \
+    "import socket; socket.create_connection(('127.0.0.1', 8443), 5).close()" \
+    || fail "health check command failed in proxy mode"
+
+echo "== trusted proxy: anyone outside the range is refused"
+start '{"hosts":["127.0.0.1"],"ssl":false,"admission":"open","members":[],"trusted_proxy":["10.99.0.0/16"]}'
+wait_listening
+client "$proxy_url" --expect-forbidden --header "X-Forwarded-For: 10.99.0.7" >/dev/null \
+    || fail "a peer outside the trusted range was not refused"
+logs_have '127.0.0.1: not a trusted proxy, refused' || fail "the refused peer was not logged"
+
 echo "== bad options stop the container with a clear message"
 start '{"hosts":[],"ssl":false,"admission":"open","members":[]}'
 wait_exited
@@ -207,6 +239,15 @@ logs_have 'set at least one host' || fail "empty hosts not explained"
 start '{"hosts":["127.0.0.1"],"ssl":true,"certfile":"missing.pem","keyfile":"privkey.pem","admission":"open","members":[]}'
 wait_exited
 logs_have 'missing.pem does not exist' || fail "missing certfile not explained"
+start '{"hosts":["127.0.0.1"],"ssl":true,"admission":"open","members":[],"trusted_proxy":["172.30.33.0/24"]}' \
+    -v "$work/ssl:/ssl:ro,z"
+wait_exited
+[ "$("$ENGINE" inspect -f '{{.State.ExitCode}}' "$NAME")" = 1 ] || fail "ssl with trusted_proxy did not exit 1"
+logs_have 'Trusted proxies and Use a certificate from /ssl are set together' || fail "ssl with trusted_proxy not explained"
+start '{"hosts":["127.0.0.1"],"ssl":false,"admission":"open","members":[],"trusted_proxy":["172.30.33.5/24"]}'
+wait_exited
+logs_have "Trusted proxies: '172.30.33.5/24' is not an address range" || fail "bad trusted_proxy range not explained"
+logs_have 'usage:' && fail "a bad trusted_proxy range reached cs-mailbox's argument parser"
 
 echo "== plain container: arguments go to cs-mailbox"
 # The /ssl pair again, still readable by root only, so the launcher has to copy it.
