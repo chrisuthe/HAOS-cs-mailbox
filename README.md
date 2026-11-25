@@ -16,9 +16,9 @@ developed in ConnectSensors, and fixes to it go there. See
 
 Experimental, like ConnectSensors itself.
 
-- **Current release:** 0.1.1, built from ConnectSensors
-  [`2ea6cee`](https://github.com/chrisuthe/ConnectSensors/commit/2ea6cee8e5db11f450884c0eaa51c33814f2f2dc)
-  with `connectsensors` 0.4.2.
+- **Current release:** 0.2.0, built on the published server image
+  `ghcr.io/chrisuthe/cs-mailbox` 0.2.0 from
+  [ConnectSensors](https://github.com/chrisuthe/ConnectSensors/tree/main/mailbox).
 - **Works with:** the [ConnectSensors integration](https://github.com/chrisuthe/connect-sensors-ha)
   0.2.0 or later, currently 0.2.3. Point its federation options at
   `wss://<host>:8443/`, and paste the app's logged certificate into
@@ -41,8 +41,8 @@ The image also runs as a plain container; see the documentation.
 
 ## Layout
 
-- `cs_mailbox/` — the app: `config.yaml`, `Dockerfile`, `requirements.txt`
-  (the pinned ConnectSensors commit and packages), the store listing
+- `cs_mailbox/` — the app: `config.yaml`, `Dockerfile` (a thin layer over
+  the pinned `cs-mailbox` image), the store listing
   (`README.md`, `DOCS.md`, `CHANGELOG.md`, `icon.png`, `logo.png`),
   `translations/`, `apparmor.txt`, and the launcher under `rootfs/`.
 - `tests/` — unit tests for the launcher.
@@ -58,9 +58,11 @@ bash scripts/verify.sh
 ```
 
 It lints the shell scripts, the workflows and the app manifest, then runs the
-smoke test: build the image, start it with the self-signed certificate, connect
-as a client (greeting signature, `register` with a valid proof, `ping`), restart
-it and check `server_id` stays and `generation` changes, then members
+smoke test: build the image, upgrade a `/data` from the published 0.1.1 and
+check `server_id` and the certificate stay, start it with the self-signed
+certificate, connect as a client (greeting signature, `register` with a valid
+proof, `ping`), restart it and check `server_id` stays and `generation`
+changes, then members
 admission, a certificate from `/ssl`, bad options, and plain-container use.
 It needs podman or docker, shellcheck, openssl and network access.
 
@@ -73,9 +75,12 @@ release.
 
 ## Updating cs-mailbox
 
-Change the commit in `cs_mailbox/requirements.txt`, and `connectsensors` to the
-release that commit is built with. Then bump `version` in `config.yaml`, add a
-`CHANGELOG.md` entry, and run `bash scripts/verify.sh`.
+The server comes from the `ghcr.io/chrisuthe/cs-mailbox` image, released from
+ConnectSensors. Move `BASE` in `cs_mailbox/Dockerfile` to the new tag and its
+multi-arch index digest (`skopeo inspect --raw docker://ghcr.io/chrisuthe/cs-mailbox:<tag> | sha256sum`).
+Then bump `version` in `config.yaml`, add a `CHANGELOG.md` entry, and run
+`bash scripts/verify.sh`. The digest is moved by hand: Dependabot's docker
+ecosystem cannot follow a digest given through an `ARG`.
 
 ## Licence
 

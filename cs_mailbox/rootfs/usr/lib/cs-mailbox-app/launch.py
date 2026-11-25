@@ -6,7 +6,8 @@ into a cs-mailbox command line. With arguments instead, as a plain container,
 they go to cs-mailbox as they are, after the server key's --key-file.
 
 Either way the launcher prepares /data as root, then runs cs-mailbox as the
-unprivileged `mailbox` user.
+unprivileged `mailbox` user. cs-mailbox gets the whole command line from here,
+and none of the base image's CS_MAILBOX_* variables.
 """
 
 import datetime
@@ -27,7 +28,8 @@ STATE_DIR = Path("/data/mailbox")
 # certificate that the unprivileged user can read.
 RUN_DIR = Path("/run/cs-mailbox")
 SSL_DIR = Path("/ssl")
-SERVER = "/usr/local/bin/cs-mailbox"
+# The base image's checkout layout; cs_mailbox.py finds connectsensors beside it.
+SERVER = "/app/mailbox/cs_mailbox.py"
 # Fixed: config.yaml maps it, and the host port is set in the app's Network
 # section.
 PORT = 8443
@@ -288,6 +290,12 @@ def from_options(options):
     return build_argv(options, hosts, cert, key, members)
 
 
+def server_env(environ):
+    """The environment without the base image's CS_MAILBOX_* variables, which
+    are container_entry.py's and have no say here."""
+    return {k: v for k, v in environ.items() if not k.startswith("CS_MAILBOX_")}
+
+
 def main(args):
     try:
         prepare_dirs()
@@ -304,8 +312,9 @@ def main(args):
     except (OSError, ValueError, ConfigError) as err:
         print(f"cs-mailbox-app: {err}", file=sys.stderr, flush=True)
         return 1
-    log(f"starting {shlex.join(argv)}")
-    os.execv(SERVER, argv)
+    command = [sys.executable, "-I", *argv]
+    log(f"starting {shlex.join(command)}")
+    os.execve(sys.executable, command, server_env(os.environ))
 
 
 if __name__ == "__main__":

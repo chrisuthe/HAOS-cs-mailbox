@@ -197,5 +197,14 @@ class PassThrough(unittest.TestCase):
         self.assertEqual(launch.pass_through(["--help"])[-1], "--help")
 
 
+class ServerEnv(unittest.TestCase):
+    def test_base_image_variables_dropped(self):
+        env = {"PATH": "/usr/bin", "CS_MAILBOX_PORT": "9000", "CS_MAILBOX_HOST": "x.example"}
+        self.assertEqual(launch.server_env(env), {"PATH": "/usr/bin"})
+
+    def test_server_is_the_base_images_script(self):
+        self.assertEqual(launch.SERVER, "/app/mailbox/cs_mailbox.py")
+
+
 if __name__ == "__main__":
     unittest.main()

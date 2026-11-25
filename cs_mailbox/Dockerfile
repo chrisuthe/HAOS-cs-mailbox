@@ -1,40 +1,32 @@
-# python:3.13-slim rather than Home Assistant's base-python: the app needs no
-# s6-overlay or bashio (the launcher is Python, and config.yaml has init: false),
-# cryptography and websockets install as prebuilt manylinux wheels, and the one
-# multi-arch digest below serves both amd64 and aarch64. It also keeps the image
-# usable as a plain container. The tag beside the digest is for the reader.
-ARG BASE=docker.io/library/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
-
-# git is needed only to fetch cs-mailbox, so it stays in this stage.
-FROM ${BASE} AS wheels
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt /tmp/requirements.txt
-RUN pip wheel --no-cache-dir --disable-pip-version-check --wheel-dir /wheels -r /tmp/requirements.txt
-
+# The published cs-mailbox server image, built and released from
+# chrisuthe/ConnectSensors (mailbox/Dockerfile). This image is only the Home
+# Assistant layer on top: the options launcher, AppArmor and the health check.
+# Pinned by its multi-arch index digest, which serves amd64 and aarch64; the tag
+# is for the reader. Moved by hand, like the other pins (.github/dependabot.yml).
+ARG BASE=ghcr.io/chrisuthe/cs-mailbox:0.2.0@sha256:6c7f35d22847df2a6f0520a864f74820bc8798c31c4184bce4972f185261fec5
 FROM ${BASE}
 
 LABEL \
     org.opencontainers.image.title="cs-mailbox Home Assistant app" \
     org.opencontainers.image.description="ConnectSensors federation mailbox server packaged as a Home Assistant app" \
     org.opencontainers.image.source="https://github.com/chrisuthe/HAOS-cs-mailbox" \
+    org.opencontainers.image.url="https://github.com/chrisuthe/HAOS-cs-mailbox" \
     org.opencontainers.image.licenses="MIT"
-
-RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
-    pip install --no-cache-dir --disable-pip-version-check --root-user-action=ignore --no-index --find-links /wheels /wheels/*.whl \
-    && groupadd --gid 10001 mailbox \
-    && useradd --uid 10001 --gid 10001 --no-create-home \
-        --home-dir /nonexistent --shell /usr/sbin/nologin mailbox
 
 COPY rootfs/ /
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-EXPOSE 8443
+# The base runs as the mailbox user (10001). The launcher starts as root to
+# prepare /data and read /ssl, then drops to that user itself.
+USER root
+WORKDIR /
 
 # Is the port accepting connections? A full handshake would need a client key,
-# and would count against admission.
+# and would count against admission. The port is fixed, so the base's
+# CS_MAILBOX_PORT is not consulted.
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD ["python3", "-I", "-c", "import socket; socket.create_connection(('127.0.0.1', 8443), 5).close()"]
 
+# Not the base's container_entry.py: the launcher builds cs-mailbox's whole
+# command line, so the base's CS_MAILBOX_* variables never reach it.
 ENTRYPOINT ["python3", "-I", "/usr/lib/cs-mailbox-app/launch.py"]
+CMD []

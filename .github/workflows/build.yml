@@ -124,9 +124,8 @@ jobs:
             echo "exists=false" >>"$GITHUB_OUTPUT"
           fi
 
-      # The image's RUN steps (pip) run under emulation for arm64. They only
-      # install prebuilt wheels, so emulation costs little; the arm64 image
-      # itself was smoke tested natively above.
+      # The image has no RUN steps, so emulation is a precaution; the arm64
+      # image itself was smoke tested natively above.
       - name: Set up QEMU
         if: steps.published.outputs.exists == 'false'
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0

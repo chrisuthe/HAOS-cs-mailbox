@@ -9,6 +9,9 @@ cd "$(dirname "$0")/.."
 
 ENGINE="${ENGINE:-$(command -v podman || command -v docker)}"
 IMAGE="${IMAGE:-cs-mailbox-app:smoke}"
+# The release before the move to the published cs-mailbox image, for the upgrade
+# check. Multi-arch, like the app.
+OLD_IMAGE="${OLD_IMAGE:-ghcr.io/chrisuthe/haos-cs-mailbox:0.1.1@sha256:3c24fb498cd527f6a8e7143c6c6c7def109663d0f0f3e0ca30a995583b0722cb}"
 NAME="cs-mailbox-app-smoke"
 URL="wss://127.0.0.1:8443/"
 
@@ -16,7 +19,7 @@ work="$(mktemp -d)"
 cleanup() {
     "$ENGINE" rm -f "$NAME" >/dev/null 2>&1 || true
     # The server's files belong to its own user; remove them as the image's root.
-    "$ENGINE" run --rm --entrypoint rm -v "$work:/w:z" "$IMAGE" -rf /w/data /w/plain >/dev/null 2>&1 || true
+    "$ENGINE" run --rm --entrypoint rm -v "$work:/w:z" "$IMAGE" -rf /w/data /w/plain /w/upgrade >/dev/null 2>&1 || true
     rm -rf "$work" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -40,11 +43,12 @@ fail() {
 }
 
 # start OPTIONS_JSON [extra engine args...]: a fresh container on the same /data,
-# as an app update or restart gives.
+# as an app update or restart gives. DATA and RUN_IMAGE pick another /data or image.
 start() {
+    local data="${DATA:-$work/data}"
     "$ENGINE" rm -f "$NAME" >/dev/null 2>&1 || true
-    printf '%s' "$1" > "$work/data/options.json"
-    "$ENGINE" run -d --name "$NAME" -v "$work/data:/data:z" "${@:2}" "$IMAGE" >/dev/null
+    printf '%s' "$1" > "$data/options.json"
+    "$ENGINE" run -d --name "$NAME" -v "$data:/data:z" "${@:2}" "${RUN_IMAGE:-$IMAGE}" >/dev/null
 }
 
 wait_listening() {
@@ -108,13 +112,31 @@ echo "== launcher unit tests, on the image's Python"
 "$ENGINE" run --rm --security-opt label=disable -v "$PWD/tests:/tests:ro" --entrypoint python3 "$IMAGE" \
     -m unittest discover -s /tests || fail "unit tests"
 
-mkdir -p "$work/data" "$work/plain" "$work/client" "$work/ssl"
+mkdir -p "$work/data" "$work/plain" "$work/upgrade" "$work/client" "$work/ssl"
 cp scripts/smoke_client.py "$work/client/"
 seed_a="$(printf '11%.0s' $(seq 32))"
 pub_a="$("$ENGINE" run --rm --entrypoint python3 "$IMAGE" -I -c \
-    "from connectsensors import ed25519_pub; print(ed25519_pub(bytes.fromhex('$seed_a')).hex())")"
+    "import sys; sys.path.insert(0, '/app/python'); from connectsensors import ed25519_pub; print(ed25519_pub(bytes.fromhex('$seed_a')).hex())")"
 
 open_options='{"hosts":["127.0.0.1","localhost"],"ssl":false,"certfile":"fullchain.pem","keyfile":"privkey.pem","admission":"open","admit_per_hour":20,"members":[]}'
+
+echo "== upgrade from $OLD_IMAGE keeps server_id and certificate"
+"$ENGINE" pull -q "$OLD_IMAGE" >/dev/null || fail "could not pull $OLD_IMAGE"
+DATA="$work/upgrade" RUN_IMAGE="$OLD_IMAGE" start "$open_options"
+wait_listening
+logged_pem > "$work/client/cert.pem"
+old_fp="$(logged_fingerprint)"
+[ -n "$old_fp" ] || fail "the old image logged no fingerprint"
+old_id="$(json_field server_id <<<"$(client "$URL")")" || fail "client session with the old image failed"
+DATA="$work/upgrade" start "$open_options"
+wait_listening
+logs_have 'Created server key' && fail "the upgrade made a new server key"
+logs_have 'Created a self-signed certificate' && fail "the upgrade made a new certificate"
+[ "$(logged_fingerprint)" = "$old_fp" ] || fail "certificate fingerprint changed across the upgrade"
+# The pin taken from the old image's log still validates.
+new_id="$(json_field server_id <<<"$(client "$URL")")" || fail "client session after the upgrade failed"
+[ "$new_id" = "$old_id" ] || fail "server_id changed across the upgrade: $old_id -> $new_id"
+echo "server_id $new_id and fingerprint $old_fp kept"
 
 echo "== self-signed certificate, open admission"
 start "$open_options"
